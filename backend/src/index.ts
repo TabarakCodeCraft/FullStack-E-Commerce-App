@@ -18,6 +18,17 @@ app.post("/webhooks/clerk", rawJson, (req, res) => {
     void clerkWebhookHandler(req, res)
 })
 
+app.get("*", (req, res, next) => {
+  if (req.path.startsWith("/api") || req.path.startsWith("/webhooks")) {
+    next();
+    return;
+  }
+
+  res.sendFile(path.join(publicDir, "index.html"), (err) => {
+    if (err) next(err);
+  });
+});
+
 
 app.use(express.json())
 app.use(cors());
