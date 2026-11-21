@@ -26,12 +26,12 @@ export async function listProducts(req: Request, res: Response, next: NextFuncti
 export async function getCategory(_req: Request, res: Response, next: NextFunction) {
     try {
         const rows = await db
-            .select({ category: products.category })
+            .selectDistinct({ category: products.category })
             .from(products)
             .where(eq(products.active, true))
+            .orderBy(products.category)
 
-        const categories = [...new Set(rows.map((r) => r.category))].sort((a, b) => a.localeCompare(b))
-        res.json({ categories })
+        res.json({ categories: rows.map((r) => r.category) })
     } catch (e) {
         next(e)
     }
@@ -47,8 +47,7 @@ export async function getProductBySlug(req: Request, res: Response, next: NextFu
             .limit(1)
 
         if (!row || !row.active) return res.status(404).json({ error: "Not Found" })
-        res.json({ products: row })
-
+        res.json({ product: row })
 
     } catch (e) {
         next(e)
