@@ -8,6 +8,8 @@ import path from "node:path";
 import { clerkMiddleware } from "@clerk/express";
 import { clerkWebhookHandler } from "./webhooks/clerk";
 import { getEnv } from "./lib/env";
+import keepAliveCron from "./lib/cron";
+
 
 const env = getEnv();
 const app = express();
@@ -31,8 +33,8 @@ app.use(express.json());
 app.use(clerkMiddleware());
 
 
-app.get("/api", (_req, res) => {
-    res.json({ status: "ok", message: "API Tabarak its running" });
+app.get("/health", (_req, res) => {
+    res.json({ ok: true });
 });
 
 if (fs.existsSync(publicDir)) {
@@ -59,4 +61,7 @@ if (fs.existsSync(publicDir)) {
 
 app.listen(env.PORT, () => {
     console.log(`Server listening on port: ${env.PORT}`);
+    if (env.NODE_ENV === "production") {
+        keepAliveCron.start();
+    }
 });
