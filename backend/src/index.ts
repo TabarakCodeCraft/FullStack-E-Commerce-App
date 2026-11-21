@@ -1,4 +1,3 @@
-
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
@@ -32,6 +31,10 @@ app.use(express.json());
 app.use(clerkMiddleware());
 
 
+app.get("/api", (_req, res) => {
+    res.json({ status: "ok", message: "API Tabarak its running" });
+});
+
 if (fs.existsSync(publicDir)) {
     app.use(express.static(publicDir));
 
@@ -48,12 +51,9 @@ if (fs.existsSync(publicDir)) {
             return next();
         }
 
-        res.sendFile(
-            path.join(publicDir, "index.html"),
-            (err) => {
-                if (err) next(err);
-            }
-        );
+        res.sendFile(path.join(publicDir, "index.html"), (err) => {
+            if (err) next(err);
+        });
     });
 }
 
