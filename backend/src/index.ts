@@ -38,7 +38,7 @@ app.get("/api", (_req, res) => {
 if (fs.existsSync(publicDir)) {
     app.use(express.static(publicDir));
 
-    app.get("/{*splat}", (req, res, next) => {
+    app.get("/{*any}", (req, res, next) => {
         if (
             req.path.startsWith("/api/") ||
             req.path === "/api" ||
