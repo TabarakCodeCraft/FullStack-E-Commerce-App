@@ -1,73 +1,48 @@
-
 import type { Request, Response } from "express";
 import { getEnv } from "../lib/env.js";
-import {
-    checkoutSessions,
-    orderItems,
-    orders,
-} from "../db/schema.js";
-import { eq, or } from "drizzle-orm";
+import { checkoutSessions, orderItems, orders } from "../db/schema.js";
+import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { Webhook } from "standardwebhooks";
 
-function headerString(
-    headers: Request["headers"],
-    name: string
-): string | undefined {
+function headerString(headers: Request["headers"], name: string) {
     const value = headers[name];
-
     return Array.isArray(value) ? value[0] : value;
 }
 
-function checkoutSessionIdFromMetadata(
-    order: Record<string, unknown>
-): string | undefined {
+function checkoutSessionIdFromMetadata(order: Record<string, unknown>) {
     const metadata = order.metadata;
-
-    if (!metadata || typeof metadata !== "object") {
-        return undefined;
-    }
-
-    const sessionId = (
-        metadata as Record<string, unknown>
-    ).checkout_session_id;
-
-    return typeof sessionId === "string"
-        ? sessionId
-        : undefined;
+    if (!metadata || typeof metadata !== "object") return undefined;
+    const sessionId = (metadata as Record<string, unknown>).checkout_session_id;
+    return typeof sessionId === "string" ? sessionId : undefined;
 }
 
-async function alreadyPaid(
-    polarOrderId?: string,
-    checkoutId?: string
-): Promise<boolean> {
-    const conditions = [];
-
+async function alreadyPaid(polarOrderId?: string, checkoutId?: string) {
     if (polarOrderId) {
-        conditions.push(eq(orders.polarOrderId, polarOrderId));
+        const [row] = await db
+            .select()
+            .from(orders)
+            .where(eq(orders.polarOrderId, polarOrderId))
+            .limit(1);
+        if (row?.status === "paid") return true;
     }
-
     if (checkoutId) {
-        conditions.push(eq(orders.polarCheckoutId, checkoutId));
+        const [row] = await db
+            .select()
+            .from(orders)
+            .where(eq(orders.polarCheckoutId, checkoutId))
+            .limit(1);
+        if (row?.status === "paid") return true;
     }
-
-    if (!conditions.length) return false;
-
-    const [row] = await db
-        .select({ id: orders.id, status: orders.status })
-        .from(orders)
-        .where(or(...conditions))
-        .limit(1);
-
-    return row?.status === "paid";
+    return false;
 }
 
 async function fulfillCheckoutSession(
     sessionId: string,
-    polarOrderId?: string,
-    checkoutId?: string
-): Promise<boolean> {
-    return db.transaction(async (tx) => {
+    polarOrderId: string | undefined,
+    checkoutId: string | undefined,
+) {
+    return await db.transaction(async (tx) => {
         const [session] = await tx
             .select()
             .from(checkoutSessions)
@@ -76,189 +51,100 @@ async function fulfillCheckoutSession(
 
         if (!session) return false;
 
-        const conditions = [];
-
-        if (polarOrderId) {
-            conditions.push(
-                eq(orders.polarOrderId, polarOrderId)
-            );
-        }
-
-        if (checkoutId) {
-            conditions.push(
-                eq(orders.polarCheckoutId, checkoutId)
-            );
-        }
-
-        if (conditions.length) {
-            const [existingOrder] = await tx
-                .select({ id: orders.id })
-                .from(orders)
-                .where(or(...conditions))
-                .limit(1);
-
-            if (existingOrder) return true;
-        }
-
         const [order] = await tx
             .insert(orders)
             .values({
                 userId: session.userId,
                 status: "paid",
                 totalCents: session.totalCents,
-                polarCheckoutId:
-                    checkoutId ??
-                    session.polarCheckoutId ??
-                    null,
-                ...(polarOrderId
-                    ? { polarOrderId }
-                    : {}),
+                polarCheckoutId: checkoutId ?? session.polarCheckoutId ?? null,
+                ...(polarOrderId ? { polarOrderId } : {}),
             })
             .returning();
 
-        if (!order) {
-            throw new Error("Failed to create order");
-        }
-
-        if (session.lines.length > 0) {
+        if (session.lines.length) {
             await tx.insert(orderItems).values(
                 session.lines.map((line) => ({
                     orderId: order.id,
                     productId: line.productId,
                     quantity: line.quantity,
                     unitPriceCents: line.unitPriceCents,
-                }))
+                })),
             );
         }
 
-        await tx
-            .delete(checkoutSessions)
-            .where(eq(checkoutSessions.id, sessionId));
+        await tx.delete(checkoutSessions).where(eq(checkoutSessions.id, sessionId));
 
         return true;
     });
 }
 
-export async function polarWebhookHandler(
-    req: Request,
-    res: Response
-) {
+export async function polarWebhookHandler(req: Request, res: Response) {
+    const env = getEnv();
+
     try {
-        const env = getEnv();
-
         if (!env.POLAR_WEBHOOK_SECRET) {
-            res.status(503).send(
-                "Polar webhooks not configured"
-            );
+            res.status(503).send("Polar webhooks not configured");
             return;
         }
 
-        if (!Buffer.isBuffer(req.body)) {
-            res.status(400).json({
-                error: "Expected raw webhook body",
-            });
-            return;
-        }
-
-        const raw = req.body;
+        const raw = req.body instanceof Buffer ? req.body : Buffer.from(String(req.body));
+        const wh = new Webhook(Buffer.from(env.POLAR_WEBHOOK_SECRET, "utf8").toString("base64"));
 
         const id = headerString(req.headers, "webhook-id");
-        const timestamp = headerString(
-            req.headers,
-            "webhook-timestamp"
-        );
-        const signature = headerString(
-            req.headers,
-            "webhook-signature"
-        );
+        const ts = headerString(req.headers, "webhook-timestamp");
+        const sig = headerString(req.headers, "webhook-signature");
 
-        if (!id || !timestamp || !signature) {
-            res.status(400).json({
-                error: "Missing webhook headers",
-            });
+        if (!id || !ts || !sig) {
+            res.status(400).json({ error: "Missing webhook headers" });
             return;
         }
 
-        const wh = new Webhook(env.POLAR_WEBHOOK_SECRET);
-
-        wh.verify(raw, {
-            "webhook-id": id,
-            "webhook-timestamp": timestamp,
-            "webhook-signature": signature,
-        });
+        wh.verify(raw, { "webhook-id": id, "webhook-timestamp": ts, "webhook-signature": sig });
 
         const event = JSON.parse(raw.toString("utf8")) as {
             type: string;
             data?: Record<string, unknown>;
         };
 
-        if (event.type !== "order.paid" || !event.data) {
-            res.json({ ok: true });
-            return;
-        }
+        if (event.type === "order.paid" && event.data) {
+            const data = event.data;
+            const polarOrderId = typeof data.id === "string" ? data.id : undefined;
+            const checkoutId = typeof data.checkout_id === "string" ? data.checkout_id : undefined;
 
-        const data = event.data;
+            if (await alreadyPaid(polarOrderId, checkoutId)) {
+                res.json({ ok: true, duplicate: true });
+                return;
+            }
 
-        const polarOrderId =
-            typeof data.id === "string"
-                ? data.id
-                : undefined;
+            const sessionId = checkoutSessionIdFromMetadata(data);
 
-        const checkoutId =
-            typeof data.checkout_id === "string"
-                ? data.checkout_id
-                : undefined;
+            if (sessionId) {
+                const ok = await fulfillCheckoutSession(sessionId, polarOrderId, checkoutId);
 
-        const sessionId =
-            checkoutSessionIdFromMetadata(data);
+                if (ok) {
+                    res.json({ ok: true });
+                    return;
+                }
 
-        if (!sessionId) {
-            console.error(
-                "Polar order.paid: missing checkout session metadata",
-                { polarOrderId, checkoutId }
-            );
+                if (await alreadyPaid(polarOrderId, checkoutId)) {
+                    res.json({ ok: true, duplicate: true });
+                    return;
+                }
 
-            res.status(500).json({
-                error: "Missing checkout session metadata",
-            });
-            return;
-        }
+                console.error("Polar order.paid: could not fulfill checkout session", {
+                    sessionId,
+                    checkoutId,
+                });
 
-        if (
-            await alreadyPaid(polarOrderId, checkoutId)
-        ) {
-            res.json({
-                ok: true,
-                duplicate: true,
-            });
-            return;
-        }
-
-        const fulfilled = await fulfillCheckoutSession(
-            sessionId,
-            polarOrderId,
-            checkoutId
-        );
-
-        if (!fulfilled) {
-            console.error(
-                "Polar order.paid: checkout session not found",
-                { sessionId, checkoutId }
-            );
-
-            res.status(500).json({
-                error: "Checkout fulfillment failed",
-            });
-            return;
+                res.status(500).json({ error: "Checkout fulfillment failed" });
+                return;
+            }
         }
 
         res.json({ ok: true });
-
-    } catch (error) {
-        console.error("Polar webhook error:", error);
-
-        res.status(400).json({
-            error: "Invalid webhook",
-        });
+    } catch (err) {
+        console.error("Polar webhook error", err);
+        res.status(400).json({ error: "Invalid webhook" });
     }
 }
