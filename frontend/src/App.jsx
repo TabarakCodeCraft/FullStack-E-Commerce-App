@@ -8,19 +8,7 @@ function App() {
 
   return (
     <Layout>
-      <header>
-        <Show when="signed-out">
-          <SignInButton mode="model" />
-          <SignUpButton mode="model" />
-        </Show>
-        <Show when="signed-in">
-          <UserButton/>
-        </Show>
-      </header>
-
-      <div className="p-10">
-        <button className="btn btn-primary">Click me</button>
-      </div>
+      
     </Layout>
   );
 }
