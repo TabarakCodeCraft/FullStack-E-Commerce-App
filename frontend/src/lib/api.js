@@ -1,8 +1,9 @@
 import * as Sentry from "@sentry/react";
 
 const raw = import.meta.env.VITE_API_URL;
-const base = typeof raw === "string" ? raw.replace(/\/+$/, "") : "";
+const base = typeof raw === "string" ? raw.replace(/\/+$/, "") : ""; // remove trailing slashes
 
+// this is an authenticated fetch req that we use to send reqs to our api
 export async function apiFetch(path, opts = {}) {
   const { getToken, method = "GET", body } = opts;
   const headers = { "Content-Type": "application/json" };
@@ -36,7 +37,9 @@ export async function apiFetch(path, opts = {}) {
 
     throw e;
   }
+
   const data = await res.json();
+
   Sentry.addBreadcrumb({
     category: "api",
     message: `${method} ${path}`,
