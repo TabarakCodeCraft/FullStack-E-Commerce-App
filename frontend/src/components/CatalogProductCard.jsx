@@ -1,7 +1,7 @@
 import { Link } from "react-router";
 import { PlusIcon } from "lucide-react";
 import { formatPrice } from "../utils/format.js";
-import { IK_PRESETS, imageKitOptimizedUrl } from "../lib/ImagekitUrl.js";
+import { IK_PRESETS, imageKitOptimizedUrl } from "../lib/urlImageKit.js";
 import { useCart } from "../store/cart.js";
 
 export function CatalogProductCard({ product }) {
