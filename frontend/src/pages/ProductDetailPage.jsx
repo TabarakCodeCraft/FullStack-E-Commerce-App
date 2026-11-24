@@ -2,7 +2,7 @@ import { Link } from "react-router";
 import { ProductPageSkeleton } from "../components/LoadingSkeletons";
 import { PageError } from "../components/PageError";
 import { useProductPage } from "../hooks/useProductPage";
-import { IK_PRESETS, imageKitOptimizedUrl, imageKitWatermarkedUrl } from "../lib/imageKitUrl";
+import { IK_PRESETS, imageKitOptimizedUrl, imageKitWatermarkedUrl } from "../lib/urlImageKit";
 import { useCart } from "../store/cart";
 import { ArrowLeftIcon, CheckIcon, ExternalLinkIcon, ShoppingCartIcon } from "lucide-react";
 import { formatPrice } from "../utils/format";
